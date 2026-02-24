@@ -4,7 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import uvicorn
 
-# --- CONFIGURAÇÃO BASE ---
+# -----------------------------
+# CONFIGURAÇÃO DA APLICAÇÃO
+# -----------------------------
 app = FastAPI(title="KOLOSSUS API - BISPO MAURICIO")
 
 app.add_middleware(
@@ -14,38 +16,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- CHAVE DE AMBIENTE (Render) ---
+# -----------------------------
+# CHAVE DE AMBIENTE (RENDER)
+# -----------------------------
 API_KEY = os.getenv("ESCRITOR_DA_LUZ")
 
 if not API_KEY:
-    raise ValueError("Variável de ambiente ESCRITOR_DA_LUZ não encontrada.")
+    raise ValueError("Variável de ambiente ESCRITOR_DA_LUZ não encontrada no Render.")
 
 genai.configure(api_key=API_KEY)
 
-# --- ENDPOINT PRINCIPAL ---
+# -----------------------------
+# ENDPOINT PRINCIPAL
+# -----------------------------
 @app.post("/executar")
 async def executar(
     prompt: str = Form(...),
     paginas: int = Form(...),
-    arquivos: list[UploadFile] = File(default=None)
+    arquivo: UploadFile = File(default=None)
 ):
     try:
         model = genai.GenerativeModel("gemini-1.5-pro")
 
         files_for_gemini = []
 
-        # Processa arquivos se existirem
-        if arquivos:
-            for arq in arquivos:
-                temp_path = f"temp_{arq.filename}"
+        # Processa arquivo se existir
+        if arquivo:
+            temp_path = f"temp_{arquivo.filename}"
 
-                with open(temp_path, "wb") as f:
-                    f.write(await arq.read())
+            with open(temp_path, "wb") as f:
+                f.write(await arquivo.read())
 
-                uploaded = genai.upload_file(path=temp_path)
-                files_for_gemini.append(uploaded)
+            uploaded = genai.upload_file(path=temp_path)
+            files_for_gemini.append(uploaded)
 
-                os.remove(temp_path)
+            os.remove(temp_path)
 
         instrucao = f"Aja como Maurício McCarthy. COMANDO: {prompt}. Gere {paginas} blocos."
 
@@ -54,7 +59,7 @@ async def executar(
         return {
             "status": "Grade Sincronizada",
             "resultado": response.text,
-            "arquivos_processados": [a.filename for a in arquivos] if arquivos else []
+            "arquivo_processado": arquivo.filename if arquivo else None
         }
 
     except Exception as e:
@@ -63,7 +68,8 @@ async def executar(
             "detalhe": str(e)
         }
 
-
-# --- EXECUÇÃO LOCAL (não afeta Render) ---
+# -----------------------------
+# EXECUÇÃO LOCAL
+# -----------------------------
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
