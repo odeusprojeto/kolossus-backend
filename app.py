@@ -1,86 +1,59 @@
-
 import os
-import google.generativeai as genai
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
 from typing import List
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+import google.generativeai as genai
+import uvicorn
 
-# ------------------------------------------------------------
-# CONFIGURAÇÃO DA API
-# ------------------------------------------------------------
+# --- CONFIGURAÇÃO DA GRADE ---
+app = FastAPI(title="KOLOSSUS API - BISPO MAURICIO")
 
-API_KEY = os.getenv("ESCRITOR_DA_LUZ")
-
-if not API_KEY:
-    raise ValueError("Defina a variável de ambiente ESCRITOR_DA_LUZ com sua API Key.")
-
-genai.configure(api_key=API_KEY)
-
-def selecionar_modelo():
-    modelos = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-    prioridade = [
-        "gemini-1.5-pro-latest",
-        "gemini-1.5-flash-latest",
-        "gemini-2.0-pro",
-        "gemini-2.0-flash"
-    ]
-    for p in prioridade:
-        for m in modelos:
-            if p in m:
-                return m
-    return "models/gemini-1.5-pro"
-
-MODELO_ATIVO = selecionar_modelo()
-
-SYSTEM_INSTRUCTION = """
-Produza exatamente o que o usuário pedir.
-Se solicitar páginas, considere aproximadamente 800 palavras por página.
-"""
-
-model = genai.GenerativeModel(
-    MODELO_ATIVO,
-    system_instruction=SYSTEM_INSTRUCTION
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-app = FastAPI()
+# Pega a chave direto do ambiente do Render
+API_KEY = os.getenv("ESCRITOR_DA_LUZ")
+genai.configure(api_key=API_KEY)
 
-# ------------------------------------------------------------
-# ENDPOINT PRINCIPAL
-# ------------------------------------------------------------
-
+# --- ENDPOINT DE EXECUÇÃO (O ARREGAÇO) ---
 @app.post("/executar")
 async def executar(
-    prompt: str = Form(...),
-    paginas: int = Form(...),
-    arquivos: List[UploadFile] = File(None)
+    prompt: str = Form(...), 
+    paginas: int = Form(...), 
+    arquivos: List[UploadFile] = File(...) # AQUI É A CORREÇÃO DO BOTÃO!
 ):
-
-    arquivos_enviados = []
-
-    if arquivos:
-        for arquivo in arquivos:
-            contents = await arquivo.read()
-            with open(arquivo.filename, "wb") as f:
-                f.write(contents)
-
-            uploaded = genai.upload_file(path=arquivo.filename)
-            arquivos_enviados.append(uploaded)
-
-    prompt_final = f"""
-    INSTRUÇÃO DO USUÁRIO:
-    {prompt}
-
-    META: Produza aproximadamente {paginas} páginas completas.
-    """
-
     try:
-        response = model.generate_content([prompt_final] + arquivos_enviados)
-        texto = response.text
-
-        return JSONResponse(content={
-            "modelo_usado": MODELO_ATIVO,
-            "resultado": texto
-        })
-
+        # 1. Seleciona o Hardware Espiritual
+        model = genai.GenerativeModel("gemini-1.5-pro")
+        
+        # 2. Processa os PDFs enviados
+        files_for_gemini = []
+        for arq in arquivos:
+            # Salva temporariamente para enviar para o Kernel do Google
+            temp_path = f"temp_{arq.filename}"
+            with open(temp_path, "wb") as f:
+                f.write(await arq.read())
+            
+            uploaded = genai.upload_file(path=temp_path)
+            files_for_gemini.append(uploaded)
+            os.remove(temp_path) # Limpa o lixo da grade
+            
+        # 3. Dispara o Motor Editorial
+        instrucao = f"Aja como Maurício McCarthy. COMANDO: {prompt}. Gere {paginas} blocos."
+        response = model.generate_content([instrucao] + files_for_gemini)
+        
+        return {
+            "status": "Grade Sincronizada",
+            "resultado": response.text,
+            "arquivos_processados": [a.filename for a in arquivos]
+        }
+        
     except Exception as e:
-        return JSONResponse(content={"erro": str(e)}, status_code=500)
+        return {"status": "Erro no Kernel", "detalhe": str(e)}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
